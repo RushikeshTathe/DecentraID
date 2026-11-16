@@ -50,6 +50,7 @@ contract IdentityAccessManager is Ownable {
         address user,
         Role role
     ) external onlyOwner {
+        require(user != address(0), "Invalid address");
         require(identities[user].isRegistered, "Not registered");
         require(role == Role.STUDENT || role == Role.FACULTY,
         "Invalid role");
@@ -67,23 +68,48 @@ contract IdentityAccessManager is Ownable {
                identities[user].isActive;
     }
 
-    // Check access
+    // Detailed status: distinguishes registered, active and role-assigned
+    function getIdentityStatus(
+        address user
+    ) external view returns (
+        bool isRegistered,
+        bool isActive,
+        bool hasRole
+    ) {
+        Identity memory identity = identities[user];
+
+        return (
+            identity.isRegistered,
+            identity.isActive,
+            identity.role != Role.NONE
+        );
+    }
+
+    // Check access. The contract owner is the only Admin (matches Ownable).
     function checkAccess(
         address user,
         Role requiredRole
     ) external view returns (bool) {
+        if (requiredRole == Role.NONE) {
+            return false;
+        }
+
+        if (requiredRole == Role.ADMIN) {
+            return user == owner();
+        }
+
         Identity memory identity = identities[user];
 
         return identity.isRegistered &&
                identity.isActive &&
-               (identity.role == requiredRole ||
-                identity.role == Role.ADMIN);
+               identity.role == requiredRole;
     }
 
     // Deactivate identity
     function deactivateIdentity(
         address user
     ) external onlyOwner {
+        require(user != address(0), "Invalid address");
         require(identities[user].isRegistered, "Not registered");
         require(identities[user].isActive, "Already inactive");
 
@@ -96,6 +122,7 @@ contract IdentityAccessManager is Ownable {
     function reactivateIdentity(
         address user
     ) external onlyOwner {
+        require(user != address(0), "Invalid address");
         require(identities[user].isRegistered, "Not registered");
         require(!identities[user].isActive, "Already active");
 

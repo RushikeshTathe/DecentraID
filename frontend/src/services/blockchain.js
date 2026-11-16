@@ -12,6 +12,7 @@ import {
   getAddChainParams,
 } from '../config/contract.js'
 import { detectInjectedProvider, switchOrAddChain } from './walletProvider.js'
+import { combineActivityEvents } from './eventUtils.js'
 
 export class BlockchainError extends Error {
   constructor(message, code = 'BLOCKCHAIN_ERROR') {
@@ -244,17 +245,27 @@ export async function getActivity() {
     const filter = contract.filters[name]()
     const events = await contract.queryFilter(filter, DEPLOYMENT_BLOCK)
     return events.map((event) => ({
+      eventName: name,
       type: label,
       address: getAddress(event.args.user),
       role: name === 'RoleAssigned' ? ROLE_NAME[Number(event.args.role)] : undefined,
       hash: event.transactionHash,
       blockNumber: event.blockNumber,
+      index: Number(event.index ?? event.logIndex ?? 0),
+      transactionIndex: Number(event.transactionIndex ?? 0),
       status: 'Confirmed',
     }))
   }))
-  const events = eventGroups.flat().sort((left, right) => right.blockNumber - left.blockNumber)
-  return Promise.all(events.map(async (event) => {
-    const block = await contract.runner.getBlock(event.blockNumber)
+
+  // De-duplicate and order by block, then by log index.
+  const events = combineActivityEvents(eventGroups.flat())
+
+  // Fetch each unique block once, then attach its timestamp.
+  const uniqueBlocks = [...new Set(events.map((event) => event.blockNumber))]
+  const blocks = new Map(await Promise.all(uniqueBlocks.map(async (blockNumber) => [blockNumber, await contract.runner.getBlock(blockNumber)])))
+
+  return events.map((event) => {
+    const block = blocks.get(event.blockNumber)
     return { ...event, timestamp: block ? Number(block.timestamp) : null }
-  }))
+  })
 }

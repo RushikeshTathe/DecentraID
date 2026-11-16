@@ -422,6 +422,10 @@ h1, h2, h3, p { margin-top: 0; }
 .transaction-meta em { display: inline-flex; align-items: center; gap: 4px; color: #318165; font-style: normal; font-size: 8px; font-weight: 700; }
 .transaction-meta .mock-status { color: #a07b36; }
 .explorer-link { flex: 0 0 auto; }
+.hash-copy { display: inline-flex; align-items: center; gap: 3px; padding: 0; color: inherit; background: transparent; border: 0; font: inherit; cursor: pointer; }
+.hash-copy svg { color: #919db0; }
+.hash-copy:hover { color: #4368cb; }
+.hash-copied { margin-left: 4px; color: #318165; font-size: 8px; font-weight: 700; }
 .activity-footnote { margin-top: 12px; display: flex; justify-content: space-between; color: #8b96a5; font-size: 9px; }
 .activity-footnote a { display: inline-flex; align-items: center; gap: 4px; color: #5972c4; }
 

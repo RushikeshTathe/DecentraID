@@ -232,6 +232,10 @@ async function main() {
       .flat()
       .every((event) => Number(event.blockNumber) >= 0 && /^0x[0-9a-f]{64}$/i.test(event.transactionHash))
   );
+  ok(
+    "event logs expose a log index for ordering",
+    activityEvents.flat().every((event) => (event.index ?? event.logIndex) !== undefined)
+  );
 
   // Student -> Faculty role change, then back
   await (await contract.assignRole(studentAddress, ROLE.FACULTY)).wait();

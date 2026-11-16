@@ -12,6 +12,7 @@ import {
   switchOrAddChain,
 } from "../src/services/walletProvider.js";
 import { formatAddress } from "../src/utils/accessControl.js";
+import { resolveSignInAccess } from "../src/services/accessPolicy.js";
 
 let passed = 0;
 
@@ -168,6 +169,45 @@ await test("formatAddress shortens a wallet address", () => {
     formatAddress("0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1", 6, 4),
     "0x90F8...c9C1"
   );
+});
+
+// 7. Sign-in access policy (owner is Admin without needing an identity)
+const OWNER = "0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1";
+const MEMBER = "0xFFcf8FDEE72ac11b5c542428B35EEF5769C409f0";
+const UNREGISTERED = { isRegistered: false, isActive: false, roleName: "NONE" };
+
+await test("owner signs in as ADMIN without a registered identity", () => {
+  const result = resolveSignInAccess({ account: OWNER, owner: OWNER, identity: UNREGISTERED, adminConfirmed: true });
+  eq(result.isOwner, true);
+  eq(result.role, "ADMIN");
+  eq(result.error, "");
+});
+
+await test("owner is rejected if contract does not confirm ADMIN", () => {
+  const result = resolveSignInAccess({ account: OWNER, owner: OWNER, identity: null, adminConfirmed: false });
+  assert.ok(result.error.length > 0);
+});
+
+await test("unregistered non-owner is rejected", () => {
+  const result = resolveSignInAccess({ account: MEMBER, owner: OWNER, identity: UNREGISTERED });
+  assert.ok(result.error.length > 0);
+});
+
+await test("inactive identity is rejected", () => {
+  const result = resolveSignInAccess({ account: MEMBER, owner: OWNER, identity: { isRegistered: true, isActive: false, roleName: "STUDENT" } });
+  assert.ok(result.error.length > 0);
+});
+
+await test("role-less identity is rejected", () => {
+  const result = resolveSignInAccess({ account: MEMBER, owner: OWNER, identity: { isRegistered: true, isActive: true, roleName: "NONE" } });
+  assert.ok(result.error.length > 0);
+});
+
+await test("active student signs in with STUDENT role", () => {
+  const result = resolveSignInAccess({ account: MEMBER, owner: OWNER, identity: { isRegistered: true, isActive: true, roleName: "STUDENT" } });
+  eq(result.isOwner, false);
+  eq(result.role, "STUDENT");
+  eq(result.error, "");
 });
 
 console.log(`\n===== ALL ${passed} WALLET TESTS PASSED =====`);

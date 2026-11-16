@@ -18,6 +18,7 @@ import {
   requestAccounts,
 } from '../services/walletProvider.js'
 import { createAuthChallenge, verifyChallengeSignature } from '../services/authService.js'
+import { resolveSignInAccess } from '../services/accessPolicy.js'
 import { getProfile, getDemoProfiles } from '../services/identityService.js'
 import { EXPECTED_CHAIN_ID } from '../config/contract.js'
 
@@ -152,24 +153,19 @@ export function WalletProvider({ children }) {
       const signature = await signer.signMessage(message)
       if (!verifyChallengeSignature(message, signature, account)) throw new Error('Wallet signature could not be verified.')
       const [nextIdentity, owner] = await Promise.all([getIdentity(account), getOwner()])
-      if (!nextIdentity.isRegistered) throw new Error('This wallet has no registered identity. Register first, then sign in again.')
-      if (!nextIdentity.isActive) throw new Error('This identity is inactive. Contact your administrator.')
-      const nextIsOwner = owner.toLowerCase() === account.toLowerCase()
+      const ownerCandidate = owner.toLowerCase() === account.toLowerCase()
       // Confirm Admin access with the contract itself (not just the address match).
-      if (nextIsOwner && !(await checkAccess(account, 'ADMIN'))) {
-        throw new Error('The contract did not confirm Admin access for the owner wallet.')
-      }
-      if (!nextIsOwner && !['STUDENT', 'FACULTY'].includes(nextIdentity.roleName)) {
-        throw new Error('Your identity has no assigned access role yet.')
-      }
-      if (!nextIsOwner && !(await checkAccess(account, nextIdentity.roleName))) {
+      const adminConfirmed = ownerCandidate ? await checkAccess(account, 'ADMIN') : false
+      const decision = resolveSignInAccess({ account, owner, identity: nextIdentity, adminConfirmed })
+      if (decision.error) throw new Error(decision.error)
+      if (!decision.isOwner && !(await checkAccess(account, nextIdentity.roleName))) {
         throw new Error('The contract did not authorize this identity for its assigned role.')
       }
       setIdentity(nextIdentity)
-      setIsOwner(nextIsOwner)
+      setIsOwner(decision.isOwner)
       setIsAuthenticated(true)
       setProfile(getProfile(account))
-      return nextIsOwner ? 'ADMIN' : nextIdentity.roleName
+      return decision.role
     } catch (authError) {
       setError(authError.code === 4001 ? 'Signature request was rejected in MetaMask.' : authError.message)
       throw authError

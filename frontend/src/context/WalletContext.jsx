@@ -155,6 +155,10 @@ export function WalletProvider({ children }) {
       if (!nextIdentity.isRegistered) throw new Error('This wallet has no registered identity. Register first, then sign in again.')
       if (!nextIdentity.isActive) throw new Error('This identity is inactive. Contact your administrator.')
       const nextIsOwner = owner.toLowerCase() === account.toLowerCase()
+      // Confirm Admin access with the contract itself (not just the address match).
+      if (nextIsOwner && !(await checkAccess(account, 'ADMIN'))) {
+        throw new Error('The contract did not confirm Admin access for the owner wallet.')
+      }
       if (!nextIsOwner && !['STUDENT', 'FACULTY'].includes(nextIdentity.roleName)) {
         throw new Error('Your identity has no assigned access role yet.')
       }

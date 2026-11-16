@@ -194,6 +194,11 @@ async function main() {
   ok("student denied ADMIN access", (await contract.checkAccess(studentAddress, ROLE.ADMIN)) === false);
   ok("faculty denied ADMIN access", (await contract.checkAccess(facultyAddress, ROLE.ADMIN)) === false);
 
+  await reverts(
+    () => contract.connect(faculty).deactivateIdentity(studentAddress),
+    "non-owner deactivation rejected"
+  );
+
   const deactivateTx = await contract.deactivateIdentity(studentAddress);
   const deactivateReceipt = await deactivateTx.wait();
   ok("student deactivated", (await contract.verifyIdentity(studentAddress)) === false);
@@ -227,6 +232,45 @@ async function main() {
       .flat()
       .every((event) => Number(event.blockNumber) >= 0 && /^0x[0-9a-f]{64}$/i.test(event.transactionHash))
   );
+
+  // Student -> Faculty role change, then back
+  await (await contract.assignRole(studentAddress, ROLE.FACULTY)).wait();
+  ok(
+    "student changed to faculty role",
+    (await contract.checkAccess(studentAddress, ROLE.FACULTY)) === true &&
+      (await contract.checkAccess(studentAddress, ROLE.STUDENT)) === false
+  );
+  await (await contract.assignRole(studentAddress, ROLE.STUDENT)).wait();
+  ok("faculty changed back to student role", (await contract.checkAccess(studentAddress, ROLE.STUDENT)) === true);
+
+  // Permission refresh across accounts (mirrors admin re-check on account switch)
+  ok(
+    "permission refresh: only owner passes ADMIN across accounts",
+    (await contract.checkAccess(adminAddress, ROLE.ADMIN)) === true &&
+      (await contract.checkAccess(studentAddress, ROLE.ADMIN)) === false &&
+      (await contract.checkAccess(facultyAddress, ROLE.ADMIN)) === false
+  );
+
+  // Dashboard statistics reconstructed from event-discovered identities
+  const discoveryEvents = await contract.queryFilter(contract.filters.IdentityRegistered(), 0);
+  const discovered = [...new Set(discoveryEvents.map((event) => ethers.getAddress(event.args.user)))];
+  const discoveredIdentities = await Promise.all(
+    discovered.map(async (address) => {
+      const identity = await contract.getIdentity(address);
+      return { address, isActive: identity[1], role: Number(identity[2]) };
+    })
+  );
+  const stats = {
+    total: discoveredIdentities.length,
+    active: discoveredIdentities.filter((identity) => identity.isActive).length,
+    inactive: discoveredIdentities.filter((identity) => !identity.isActive).length,
+    students: discoveredIdentities.filter((identity) => identity.role === ROLE.STUDENT).length,
+    faculty: discoveredIdentities.filter((identity) => identity.role === ROLE.FACULTY).length,
+  };
+  ok("dashboard stats: two registered identities", stats.total === 2);
+  ok("dashboard stats: two active identities", stats.active === 2);
+  ok("dashboard stats: zero inactive identities", stats.inactive === 0);
+  ok("dashboard stats: one student and one faculty", stats.students === 1 && stats.faculty === 1);
 
   console.log(`\n===== ALL ${passed} INTEGRATION TESTS PASSED =====`);
 }

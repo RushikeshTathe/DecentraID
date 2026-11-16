@@ -37,7 +37,10 @@ export default function AdminDashboard() {
     if (!modal || demoMode) return
     setBusy(true)
     try {
-      const result = modal.kind === 'role' ? await assignRole(modal.address, modal.role) : await setIdentityActive(modal.address, !modal.active)
+      const onSubmitted = (hash) => setToast({ title: 'Transaction submitted', message: `Waiting for confirmation · ${hash.slice(0, 12)}…` })
+      const result = modal.kind === 'role'
+        ? await assignRole(modal.address, modal.role, { onSubmitted })
+        : await setIdentityActive(modal.address, !modal.active, { onSubmitted })
       setToast({ title: 'Transaction confirmed', message: `Hash: ${result.hash}` }); setModal(null); await refresh()
     } catch (error) { setToast({ type: 'error', title: 'Transaction failed', message: error.code === 4001 ? 'Rejected in MetaMask.' : error.message }) }
     finally { setBusy(false) }

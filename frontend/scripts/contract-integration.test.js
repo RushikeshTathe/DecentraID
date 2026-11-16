@@ -251,6 +251,18 @@ async function main() {
       (await contract.checkAccess(facultyAddress, ROLE.ADMIN)) === false
   );
 
+  // Inactive faculty denied access, reactivation restores it
+  await (await contract.deactivateIdentity(facultyAddress)).wait();
+  ok("inactive faculty denied access", (await contract.checkAccess(facultyAddress, ROLE.FACULTY)) === false);
+  await (await contract.reactivateIdentity(facultyAddress)).wait();
+  ok("reactivated faculty access restored", await contract.checkAccess(facultyAddress, ROLE.FACULTY));
+
+  // Unregistered wallet cannot enter student or faculty workspaces
+  const outsider = await provider.getSigner(3);
+  const outsiderAddress = await outsider.getAddress();
+  ok("unregistered wallet denied student access", (await contract.checkAccess(outsiderAddress, ROLE.STUDENT)) === false);
+  ok("unregistered wallet denied faculty access", (await contract.checkAccess(outsiderAddress, ROLE.FACULTY)) === false);
+
   // Dashboard statistics reconstructed from event-discovered identities
   const discoveryEvents = await contract.queryFilter(contract.filters.IdentityRegistered(), 0);
   const discovered = [...new Set(discoveryEvents.map((event) => ethers.getAddress(event.args.user)))];

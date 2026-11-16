@@ -1,18 +1,36 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { getAddress } from 'ethers'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { BrowserProvider, getAddress } from 'ethers'
 import { useNavigate } from 'react-router-dom'
 import {
   assertExpectedNetwork,
   getIdentity,
-  getInjectedProvider,
   getOwner,
   requireInjectedProvider,
   checkAccess,
+  switchToExpectedNetwork,
 } from '../services/blockchain.js'
+import {
+  detectInjectedProvider,
+  isUnsupportedChain,
+  normalizeChainId,
+  pickPrimaryAccount,
+  readChainId,
+  requestAccounts,
+} from '../services/walletProvider.js'
 import { createAuthChallenge, verifyChallengeSignature } from '../services/authService.js'
 import { getProfile, getDemoProfiles } from '../services/identityService.js'
+import { EXPECTED_CHAIN_ID } from '../config/contract.js'
 
 const WalletContext = createContext(null)
+
+function safeChecksumAddress(value) {
+  if (!value) return ''
+  try {
+    return getAddress(value)
+  } catch {
+    return ''
+  }
+}
 
 export function WalletProvider({ children }) {
   const navigate = useNavigate()
@@ -24,7 +42,15 @@ export function WalletProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [demoMode, setDemoMode] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [connecting, setConnecting] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const [hasProvider, setHasProvider] = useState(() => Boolean(detectInjectedProvider()))
   const [error, setError] = useState('')
+  const accountRef = useRef(account)
+
+  useEffect(() => {
+    accountRef.current = account
+  }, [account])
 
   const clearWalletAuth = useCallback((nextAccount = '') => {
     setAccount(nextAccount)
@@ -36,36 +62,82 @@ export function WalletProvider({ children }) {
     setDemoMode(false)
   }, [])
 
+  // Detect a provider that injects itself after first render (e.g. mobile wallets).
   useEffect(() => {
-    const injected = getInjectedProvider()
-    if (!injected) return undefined
-    const handleAccounts = (accounts) => {
-      clearWalletAuth(accounts[0] || '')
-      if (accounts[0]) navigate('/access-denied', { replace: true, state: { reason: 'account-changed' } })
-    }
-    const handleChain = (nextChainId) => {
-      setChainId(Number.parseInt(nextChainId, 16))
-      clearWalletAuth(account)
-      navigate('/access-denied', { replace: true, state: { reason: 'network-changed' } })
-    }
-    injected.on('accountsChanged', handleAccounts)
-    injected.on('chainChanged', handleChain)
+    if (hasProvider) return undefined
+    const refresh = () => setHasProvider(Boolean(detectInjectedProvider()))
+    window.addEventListener('ethereum#initialized', refresh)
+    const timer = window.setTimeout(refresh, 1000)
     return () => {
-      injected.removeListener('accountsChanged', handleAccounts)
-      injected.removeListener('chainChanged', handleChain)
+      window.removeEventListener('ethereum#initialized', refresh)
+      window.clearTimeout(timer)
     }
-  }, [account, clearWalletAuth, navigate])
+  }, [hasProvider])
+
+  // Wallet events: account change, network change, and disconnection.
+  useEffect(() => {
+    const injected = detectInjectedProvider()
+    if (!injected) return undefined
+
+    const handleAccounts = (accounts) => {
+      const nextAccount = safeChecksumAddress(pickPrimaryAccount(accounts))
+      clearWalletAuth(nextAccount)
+      if (nextAccount) {
+        navigate('/access-denied', { replace: true, state: { reason: 'account-changed' } })
+      } else {
+        navigate('/', { replace: true })
+      }
+    }
+
+    const handleChain = (nextChainIdHex) => {
+      const nextChainId = normalizeChainId(nextChainIdHex)
+      setChainId(nextChainId)
+      clearWalletAuth(accountRef.current)
+      if (isUnsupportedChain(nextChainId, EXPECTED_CHAIN_ID)) {
+        navigate('/access-denied', { replace: true, state: { reason: 'network-changed' } })
+      }
+    }
+
+    injected.on?.('accountsChanged', handleAccounts)
+    injected.on?.('chainChanged', handleChain)
+    return () => {
+      injected.removeListener?.('accountsChanged', handleAccounts)
+      injected.removeListener?.('chainChanged', handleChain)
+    }
+  }, [clearWalletAuth, navigate])
 
   const connectWallet = useCallback(async () => {
     setError('')
-    const provider = requireInjectedProvider()
-    const accounts = await provider.send('eth_requestAccounts', [])
-    if (!accounts[0]) throw new Error('No wallet account was selected.')
-    const network = await provider.getNetwork()
-    setAccount(getAddress(accounts[0]))
-    setChainId(Number(network.chainId))
-    setIsAuthenticated(false)
-    return getAddress(accounts[0])
+    const injected = detectInjectedProvider()
+    setHasProvider(Boolean(injected))
+
+    if (!injected) {
+      const missing = new Error('MetaMask was not detected. Install MetaMask to connect a wallet.')
+      missing.code = 'NO_WALLET'
+      setError(missing.message)
+      throw missing
+    }
+
+    setConnecting(true)
+    try {
+      const provider = new BrowserProvider(injected)
+      const accounts = await requestAccounts(provider)
+      const nextChainId = await readChainId(provider)
+      const nextAccount = safeChecksumAddress(pickPrimaryAccount(accounts))
+      setAccount(nextAccount)
+      setChainId(nextChainId)
+      setIsAuthenticated(false)
+      return nextAccount
+    } catch (connectError) {
+      setError(
+        connectError?.code === 4001
+          ? 'Wallet connection request was rejected in MetaMask.'
+          : connectError.message
+      )
+      throw connectError
+    } finally {
+      setConnecting(false)
+    }
   }, [])
 
   const authenticate = useCallback(async () => {
@@ -102,6 +174,28 @@ export function WalletProvider({ children }) {
     }
   }, [account])
 
+  const switchNetwork = useCallback(async () => {
+    setError('')
+    setSwitching(true)
+    try {
+      await switchToExpectedNetwork()
+      const injected = detectInjectedProvider()
+      if (injected) {
+        const provider = new BrowserProvider(injected)
+        setChainId(await readChainId(provider))
+      }
+    } catch (switchError) {
+      setError(
+        switchError?.code === 4001
+          ? 'Network switch was rejected in MetaMask.'
+          : switchError.message
+      )
+      throw switchError
+    } finally {
+      setSwitching(false)
+    }
+  }, [])
+
   const refreshIdentity = useCallback(async () => {
     if (!account) return null
     const latest = await getIdentity(account)
@@ -126,10 +220,16 @@ export function WalletProvider({ children }) {
     navigate(role === 'ADMIN' ? '/admin' : role === 'FACULTY' ? '/faculty' : '/student')
   }, [navigate])
 
+  const networkMismatch = isUnsupportedChain(chainId, EXPECTED_CHAIN_ID)
+
   const value = useMemo(() => ({
-    account, chainId, isAuthenticated, identity, isOwner, profile, demoMode, busy, error,
-    connectWallet, authenticate, disconnectWallet, refreshIdentity, enterDemo, setError, setProfile,
-  }), [account, chainId, isAuthenticated, identity, isOwner, profile, demoMode, busy, error, connectWallet, authenticate, disconnectWallet, refreshIdentity, enterDemo])
+    account, chainId, isAuthenticated, identity, isOwner, profile, demoMode,
+    busy, connecting, switching, hasProvider, networkMismatch, error,
+    connectWallet, authenticate, disconnectWallet, refreshIdentity, enterDemo,
+    switchNetwork, setError, setProfile,
+  }), [account, chainId, isAuthenticated, identity, isOwner, profile, demoMode,
+    busy, connecting, switching, hasProvider, networkMismatch, error,
+    connectWallet, authenticate, disconnectWallet, refreshIdentity, enterDemo, switchNetwork])
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
 }

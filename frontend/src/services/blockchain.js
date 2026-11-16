@@ -5,9 +5,12 @@ import {
   CONTRACT_CONFIGURED,
   DEPLOYMENT_BLOCK,
   EXPECTED_CHAIN_ID,
+  EXPECTED_NETWORK_NAME,
   ROLE,
   ROLE_NAME,
+  getAddChainParams,
 } from '../config/contract.js'
+import { detectInjectedProvider, switchOrAddChain } from './walletProvider.js'
 
 export class BlockchainError extends Error {
   constructor(message, code = 'BLOCKCHAIN_ERROR') {
@@ -18,7 +21,7 @@ export class BlockchainError extends Error {
 }
 
 export function getInjectedProvider() {
-  return window.ethereum || null
+  return detectInjectedProvider()
 }
 
 export function requireInjectedProvider() {
@@ -30,8 +33,31 @@ export function requireInjectedProvider() {
 export async function assertExpectedNetwork(provider) {
   if (!EXPECTED_CHAIN_ID) return
   const network = await provider.getNetwork()
-  if (Number(network.chainId) !== EXPECTED_CHAIN_ID) {
-    throw new BlockchainError(`Wrong network. Switch MetaMask to chain ID ${EXPECTED_CHAIN_ID}.`, 'WRONG_NETWORK')
+  const currentChainId = Number(network.chainId)
+  if (currentChainId !== Number(EXPECTED_CHAIN_ID)) {
+    throw new BlockchainError(
+      `Wrong network detected (chain ID ${currentChainId}). Switch MetaMask to ${EXPECTED_NETWORK_NAME} (chain ID ${EXPECTED_CHAIN_ID}).`,
+      'WRONG_NETWORK'
+    )
+  }
+}
+
+export async function switchToExpectedNetwork() {
+  const injected = detectInjectedProvider()
+  if (!injected) {
+    throw new BlockchainError('MetaMask was not detected. Install it to continue.', 'NO_WALLET')
+  }
+  if (!EXPECTED_CHAIN_ID) {
+    throw new BlockchainError('No target network is configured.', 'NOT_CONFIGURED')
+  }
+
+  try {
+    return await switchOrAddChain(injected, {
+      chainId: EXPECTED_CHAIN_ID,
+      addParams: getAddChainParams(),
+    })
+  } catch (error) {
+    throw new BlockchainError(error.message, error.code || 'NETWORK_SWITCH_FAILED')
   }
 }
 

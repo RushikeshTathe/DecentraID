@@ -1,57 +1,76 @@
-# Sample Hardhat 3 Project (`mocha` and `ethers`)
+# DecentraID – Blockchain (Smart Contract + Local Chain)
 
-This project showcases a Hardhat 3 project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+This folder contains the DecentraID smart contract and the scripts that compile, deploy, and test it against a local Ganache blockchain.
 
-To learn more about Hardhat 3, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3](https://hardhat.org/hardhat3-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+> **Note:** `Counter.sol`, `contracts/Counter.t.sol`, `test/Counter.ts`, `ignition/modules/Counter.ts`, and `scripts/send-op-tx.ts` are leftovers from the default Hardhat 3 starter template. They are **not** used by DecentraID. The supported workflow is the solcjs + Ganache + ethers flow below.
 
-## Project Overview
+## Prerequisites
 
-This example project includes:
+- Node.js (v22+) and npm
+- Ganache (installed as a dev dependency, no global install required)
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+## 1. Install dependencies
 
-## Usage
-
-### Running Tests
-
-To run all the tests in the project, execute the following command:
-
-```shell
-npx hardhat test
+```bash
+npm install
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
+## 2. Start Ganache (terminal 1)
 
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
+```bash
+npm run ganache
 ```
 
-### Make a deployment to Sepolia
+Ganache listens on `http://127.0.0.1:7545` (chain ID `1337`). Keep this terminal running.
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
+## 3. Compile the contract
 
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+```bash
+npm run compile
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+This runs `solcjs` and writes the ABI and bytecode into `artifacts/`:
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
+- `contracts_IdentityAccessManager_sol_IdentityAccessManager.abi`
+- `contracts_IdentityAccessManager_sol_IdentityAccessManager.bin`
 
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
+`artifacts/` is gitignored, so always compile after a fresh clone.
 
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
+## 4. Deploy (terminal 2)
+
+Use a funded **Ganache account private key**. Never commit it.
+
+```powershell
+$env:DEPLOYER_PRIVATE_KEY="0x...private key of Ganache account #0..."
+npm run deploy
 ```
 
-After setting the variable, you can run the deployment with the Sepolia network:
+The script prints the deployed **contract address** and **transaction hash**. Account #0 becomes the contract owner/Admin.
 
-```shell
-npx hardhat ignition deploy --network sepolia ignition/modules/Counter.ts
+## 5. Run the tests (fresh Ganache recommended)
+
+```powershell
+$env:CONTRACT_ADDRESS="0x...deployed contract address..."
+npm run test
 ```
+
+The suite expects a freshly started Ganache with a fresh deployment. If the test accounts are already registered, restart Ganache and redeploy for a clean run.
+
+Tests cover: student/faculty registration, duplicate-position rejection, role assignment, wrong-role denial, deactivation, reactivation, non-admin rejection, and identity retrieval.
+
+## npm scripts
+
+| Script | Purpose |
+|---|---|
+| `npm run ganache` | Start local Ganache on `127.0.0.1:7545` |
+| `npm run compile` | Compile `IdentityAccessManager` with solcjs into `artifacts/` |
+| `npm run deploy` | Deploy using `DEPLOYER_PRIVATE_KEY` |
+| `npm run test` | Run the DecentraID contract test suite |
+
+## Environment variables
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `DEPLOYER_PRIVATE_KEY` | `deploy.js` | Private key of the deploying Ganache account (never commit) |
+| `CONTRACT_ADDRESS` | `test.js` | Deployed contract address to test |
+| `GANACHE_RPC_URL` | both | Optional RPC override (default `http://127.0.0.1:7545`) |

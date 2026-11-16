@@ -2,6 +2,12 @@
   "name": "blockchain",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "ganache": "ganache --server.host 127.0.0.1 --server.port 7545 --wallet.deterministic",
+    "compile": "solcjs --bin --abi --base-path . --include-path node_modules -o artifacts contracts/IdentityAccessManager.sol",
+    "deploy": "node deploy.js",
+    "test": "node test.js"
+  },
   "devDependencies": {
     "@nomicfoundation/edr": "^0.25.1",
     "@nomicfoundation/hardhat-ethers": "^4.2.2",
